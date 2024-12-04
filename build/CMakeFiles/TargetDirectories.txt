@@ -1,0 +1,5 @@
+/Users/egorordinarcev/untitled/build/CMakeFiles/webserver.dir
+/Users/egorordinarcev/untitled/build/CMakeFiles/package.dir
+/Users/egorordinarcev/untitled/build/CMakeFiles/package_source.dir
+/Users/egorordinarcev/untitled/build/CMakeFiles/edit_cache.dir
+/Users/egorordinarcev/untitled/build/CMakeFiles/rebuild_cache.dir
