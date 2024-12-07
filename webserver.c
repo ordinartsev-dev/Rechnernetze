@@ -6,6 +6,7 @@
 #include <netdb.h>
 #include <errno.h>
 #include <unistd.h>
+#include <ctype.h>
 
 static char last_uri[256] = {0};
 char global_body[8192] = {0};
@@ -15,8 +16,252 @@ typedef struct {
     char content[8192];
 } DynamicResource;
 
-DynamicResource dynamic_resources[100]; // Resource array
-int resource_count = 0;                 // Resource counter
+DynamicResource dynamic_resources[100];
+int resource_count = 0;
+
+// Forward declaration
+int check(char *str);
+
+static struct sockaddr_in derive_sockaddr(const char* host, const char* port) {
+    struct addrinfo hints = {
+        .ai_family = AF_INET,
+    };
+    struct addrinfo *result_info;
+    int returncode = getaddrinfo(host, port, &hints, &result_info);
+    if (returncode) {
+        fprintf(stderr, "Error parsing host/port");
+        exit(EXIT_FAILURE);
+    }
+    struct sockaddr_in result = *((struct sockaddr_in*) result_info->ai_addr);
+    freeaddrinfo(result_info);
+    return result;
+}
+
+int main(int argc, char *argv[])
+{
+    if (argc != 3) {
+        printf("Usage: %s <IP-address> <port>\n", argv[0]);
+        return 1;
+    }
+
+    const char *host = argv[1];
+    const char *port = argv[2];
+    int port_number = atoi(port);
+    if (port_number <= 0 || port_number > 65535) {
+        printf("Invalid port number. Please provide a value between 1 and 65535.\n");
+        return 1;
+    }
+
+    struct sockaddr_in server_addr = derive_sockaddr(host, port);
+
+    int sock = socket(AF_INET, SOCK_STREAM, 0);
+    if (sock == -1) {
+        printf("Socket creation failed: %s\n", strerror(errno));
+        return 1;
+    }
+
+    printf("Socket created\n");
+
+    int opt = 1;
+    if (setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)) == -1) {
+        perror("Failed to set SO_REUSEADDR");
+        close(sock);
+        return 1;
+    }
+
+    if (bind(sock, (struct sockaddr *)&server_addr, sizeof(server_addr)) == -1) {
+        printf("Bind failed: %s\n", strerror(errno));
+        close(sock);
+        return 1;
+    }
+
+    printf("Bind successful on %s:%s\n", host, port);
+
+    if (listen(sock, 10) == -1) {
+        printf("Listen failed: %s\n", strerror(errno));
+        close(sock);
+        exit(EXIT_FAILURE);
+    }
+
+    printf("Server is listening on port %s\n", port);
+
+    while (1) {
+        struct sockaddr_in client_addr;
+        socklen_t client_len = sizeof(client_addr);
+        int client_sock = accept(sock, (struct sockaddr*)&client_addr, &client_len);
+        if (client_sock == -1) {
+            perror("Accept failed");
+            close(sock);
+            return 1;
+        }
+        printf("Accepted connection\n");
+
+        // Handle multiple requests on the same connection
+        char request_buffer[8192];
+        int buffer_length = 0;
+        memset(request_buffer, 0, sizeof(request_buffer));
+
+        while (1) {
+            char buffer[8192];
+            ssize_t received = recv(client_sock, buffer, sizeof(buffer), 0);
+
+            if (received == -1) {
+                perror("Receive failed");
+                break;
+            }
+
+            if (received == 0) {
+                perror("Connection was closed by the client");
+                break;
+            }
+
+            // Append new data to request_buffer
+            if (buffer_length + (int)received > (int)sizeof(request_buffer)) {
+                fprintf(stderr, "Error: Request too large\n");
+                break;
+            }
+            memcpy(request_buffer + buffer_length, buffer, received);
+            buffer_length += received;
+
+            // UPDATED: Process all complete requests in the buffer
+            int processed = 1;
+            while (processed) {
+                processed = 0;
+                char *header_end = strstr(request_buffer, "\r\n\r\n");
+                if (header_end) {
+                    // Temporarily end the headers at header_end
+                    *header_end = '\0';
+
+                    // Parse headers to find Content-Length
+                    char *headers_copy = strdup(request_buffer);
+                    int content_length = 0;
+                    {
+                        // Quickly parse headers to find Content-Length
+                        char *line = strtok(headers_copy, "\r\n");
+                        // First line is request line
+                        line = strtok(NULL, "\r\n");
+                        while (line) {
+                            char *delim = strchr(line, ':');
+                            if (delim) {
+                                *delim = '\0';
+                                char *key = line;
+                                char *value = delim + 1;
+                                while (*value == ' ') value++;
+                                if (strcasecmp(key, "Content-Length") == 0) {
+                                    content_length = atoi(value);
+                                    break;
+                                }
+                            }
+                            line = strtok(NULL, "\r\n");
+                        }
+                    }
+                    free(headers_copy);
+
+                    // Check if we have the full body
+                    char *body_start = header_end + 4;
+                    int header_size = (int)(body_start - request_buffer);
+                    if (header_size + content_length > buffer_length) {
+                        // Not enough data received yet for the body
+                        // Restore '\r\n\r\n'
+                        // Wait for more data in outer loop
+                        continue;
+                    }
+
+                    // We have full request (headers + body)
+                    // Extract the body
+                    memset(global_body, 0, sizeof(global_body));
+                    if (content_length > 0) {
+                        memcpy(global_body, body_start, content_length);
+                        global_body[content_length] = '\0';
+                    }
+
+                    // Null-terminate headers cleanly again
+                    *header_end = '\0';
+
+                    // Call check
+                    int status_code = check(request_buffer);
+
+                    // Build response
+                    char response[16384];
+                    memset(response, 0, sizeof(response));
+
+                    // Default response if not set by conditions below
+                    snprintf(response, sizeof(response), "HTTP/1.1 500 Internal Server Error\r\nContent-Length: 0\r\n\r\n");
+
+                    if (status_code == 400) {
+                        snprintf(response, sizeof(response), "HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\n\r\n");
+                    } else if (status_code == 404) {
+                        snprintf(response, sizeof(response), "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n");
+                    } else if (status_code == 413) {
+                        snprintf(response, sizeof(response), "HTTP/1.1 413 Payload Too Large\r\nContent-Length: 0\r\n\r\n");
+                    } else if (status_code == 501) {
+                        snprintf(response, sizeof(response), "HTTP/1.1 501 Not Implemented\r\nContent-Length: 0\r\n\r\n");
+                    } else if (status_code == 200) {
+                        if (strncmp(last_uri, "/static/", 8) == 0) {
+                            char *resource_name = last_uri + 8;
+                            if (strcmp(resource_name, "foo") == 0) {
+                                snprintf(response, sizeof(response), "HTTP/1.1 200 OK\r\nContent-Length: 3\r\n\r\nFoo");
+                            } else if (strcmp(resource_name, "bar") == 0) {
+                                snprintf(response, sizeof(response), "HTTP/1.1 200 OK\r\nContent-Length: 3\r\n\r\nBar");
+                            } else if (strcmp(resource_name, "baz") == 0) {
+                                snprintf(response, sizeof(response), "HTTP/1.1 200 OK\r\nContent-Length: 3\r\n\r\nBaz");
+                            } else {
+                                snprintf(response, sizeof(response), "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n");
+                            }
+                        } else if (strncmp(last_uri, "/dynamic/", 9) == 0) {
+                            char *resource_name = last_uri + 9;
+                            int found = 0;
+                            for (int i = 0; i < resource_count; i++) {
+                                if (strcmp(dynamic_resources[i].path, resource_name) == 0) {
+                                    snprintf(response, sizeof(response),
+                                             "HTTP/1.1 200 OK\r\nContent-Length: %ld\r\n\r\n%s",
+                                             strlen(dynamic_resources[i].content),
+                                             dynamic_resources[i].content);
+                                    found = 1;
+                                    break;
+                                }
+                            }
+                            if (!found) {
+                                snprintf(response, sizeof(response), "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n");
+                            }
+                        }
+                    } else if (status_code == 201) {
+                        snprintf(response, sizeof(response), "HTTP/1.1 201 Created\r\nContent-Length: 0\r\n\r\n");
+                    } else if (status_code == 403) {
+                        snprintf(response, sizeof(response), "HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\n\r\n");
+                    } else if (status_code == 204) {
+                        snprintf(response, sizeof(response), "HTTP/1.1 204 No Content\r\nContent-Length: 0\r\n\r\n");
+                    }
+
+                    int bytes_sent = send(client_sock, response, strlen(response), 0);
+                    if (bytes_sent == -1) {
+                        perror("Send failed");
+                    }
+
+                    // UPDATED: Move leftover data (if any) to the front of request_buffer
+                    int total_request_size = header_size + content_length;
+                    int leftover = buffer_length - total_request_size;
+                    if (leftover > 0) {
+                        memmove(request_buffer, request_buffer + total_request_size, leftover);
+                    }
+                    buffer_length = leftover;
+
+                    // Clear global arrays for next request
+                    memset(global_body, 0, sizeof(global_body));
+                    memset(last_uri, 0, sizeof(last_uri));
+
+                    processed = 1;
+                }
+            }
+        }
+
+        // Close the client socket after finishing
+        close(client_sock);
+    }
+
+    close(sock);
+    return 0;
+}
 
 int check(char *str) {
     if (str == NULL) {
@@ -37,7 +282,7 @@ int check(char *str) {
     }
 
     // Check headers
-    int header_count = 0;  // Counter for headers
+    int header_count = 0;
     char *header = strtok(NULL, "\r\n");
     while (header) {
         if (header_count >= 40) {
@@ -46,33 +291,26 @@ int check(char *str) {
         }
         header_count++;
 
-        // Check the separator ':'
         char *delimiter = strchr(header, ':');
         if (!delimiter) {
             fprintf(stderr, "Error: Invalid header format: %s\n", header);
             return 400;
         }
 
-        // Divide the key's and header's values
-        *delimiter = '\0'; // Replace ':' with '\0'
+        *delimiter = '\0';
         char *key = header;
         char *value = delimiter + 1;
-
-        // Remove leading spaces from the value
         while (*value == ' ') value++;
 
-        // Check length of key and value
         if (strlen(key) > 256) {
             fprintf(stderr, "Error: Header name too long: %s\n", key);
             return 400;
         }
-
         if (strlen(value) > 256) {
             fprintf(stderr, "Error: Header value too long: %s\n", value);
             return 400;
         }
 
-        // Process the header
         if (strcasecmp(key, "Content-Length") == 0) {
             content_length = atoi(value);
             if (content_length > 8192) {
@@ -82,24 +320,15 @@ int check(char *str) {
             printf("Parsed Content-Length: %d\n", content_length);
         }
 
-        // Proceed to the next header
         header = strtok(NULL, "\r\n");
     }
 
-    // Check the methods
-    // Processing method GET
     if (strcmp(method, "GET") == 0) {
-        // Check the existence of the file
         if (strncmp(last_uri, "/static/", 8) == 0) {
             char *resource_name = last_uri + 8;
-            if (strcmp(resource_name, "foo") == 0) {
-                // "foo" is found
-                return 200;
-            } else if (strcmp(resource_name, "bar") == 0) {
-                // "bar" is found
-                return 200;
-            } else if (strcmp(resource_name, "baz") == 0) {
-                // "baz" is found
+            if (strcmp(resource_name, "foo") == 0 ||
+                strcmp(resource_name, "bar") == 0 ||
+                strcmp(resource_name, "baz") == 0) {
                 return 200;
             } else {
                 return 404;
@@ -119,17 +348,13 @@ int check(char *str) {
     } else if (strcmp(method, "PUT") == 0) {
         if (strncmp(last_uri, "/dynamic/", 9) == 0) {
             char *resource_name = last_uri + 9;
-            // Check if resource exists
             for (int i = 0; i < resource_count; i++) {
                 if (strcmp(dynamic_resources[i].path, resource_name) == 0) {
-                    // Update existing resource
                     strncpy(dynamic_resources[i].content, global_body, 8191);
                     dynamic_resources[i].content[8191] = '\0';
                     return 204; // No Content
                 }
             }
-
-            // Create new resource if not found
             if (resource_count < 100) {
                 strncpy(dynamic_resources[resource_count].path, resource_name, 255);
                 dynamic_resources[resource_count].path[255] = '\0';
@@ -141,9 +366,8 @@ int check(char *str) {
             return 403; // Forbidden
         }
         return 403; // Forbidden
-    }
-    // Process DELETE
-    else if (strcmp(method, "DELETE") == 0) {
+
+    } else if (strcmp(method, "DELETE") == 0) {
         if (strncmp(last_uri, "/dynamic/", 9) == 0) {
             char *resource_name = last_uri + 9;
             for (int i = 0; i < resource_count; i++) {
@@ -152,235 +376,17 @@ int check(char *str) {
                         dynamic_resources[j] = dynamic_resources[j + 1];
                     }
                     resource_count--;
-                    return 204; // Resource deleted successfully
+                    return 204; // No Content
                 }
             }
             return 404; // Resource not found
         } else {
             return 403;
         }
+
     } else {
         fprintf(stderr, "Error: Method not implemented: %s\n", method);
         return 501; // This method is not implemented
     }
-
-    return 0; // Success
-}
-
-static struct sockaddr_in derive_sockaddr(const char* host, const char* port) {
-    struct addrinfo hints = {
-        .ai_family = AF_INET,
-     };
-    struct addrinfo *result_info;
-    // Resolve the host (IP address or hostname) into a list of possible addresses.
-    int returncode = getaddrinfo(host, port, &hints, &result_info);
-    if (returncode) {
-        fprintf(stderr, "Error␣parsing␣host/port");
-        exit(EXIT_FAILURE);
-    }
-    // Copy the sockaddr_in structure from the first address in the list
-    struct sockaddr_in result = *((struct sockaddr_in*) result_info->ai_addr);
-    // Free the allocated memory for the result_info
-    freeaddrinfo(result_info);
-    return result;
-}
-
-int main(int argc, char *argv[])
-{
-    if (argc != 3) { // Expected two arguments: IP-address and port-number
-        printf("Usage: %s <IP-address> <port>\n", argv[0]);
-        return 1;
-    }
-
-    const char *host = argv[1];
-    const char *port = argv[2];
-
-    // Extract integer out of the char
-    int port_number = atoi(port);
-    if (port_number <= 0 || port_number > 65535)    // Check that the port-number is correct
-    {
-        printf("Invalid port number. Please provide a value between 1 and 65535.\n");
-        return 1;
-    }
-
-    struct sockaddr_in server_addr = derive_sockaddr(host, port);
-
-    // Now server_addr contains IP and port-number for usage in bind() or connect()
-
-    int sock = socket(AF_INET, SOCK_STREAM, 0);
-
-    // Check if the creation of socket is not successful
-    if (sock == -1)
-    {
-        printf("Socket creation failed with error: %s\n", strerror(errno));
-        return 1;
-    }
-
-    printf("Socket created\n");
-
-    // Installing SO_REUSEADDR for socket
-    int opt = 1;
-    if (setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)) == -1) {
-        perror("Failed to set SO_REUSEADDR");
-        close(sock);
-        return 1;
-    }
-
-    // Bind the socket to the port and address
-    if (bind(sock, (struct sockaddr *)&server_addr, sizeof(server_addr)) == -1)
-    {
-        printf("Bind failed: %s\n", strerror(errno));
-        close(sock);    // Close socket
-        return 1;
-    }
-
-    printf("Bind successful on %s:%s\n", host, port);
-
-    // Switch the socket into listen mode
-    if (listen(sock, 10) == -1) // Queue up to 10 connections
-    {
-        printf("Listen failed: %s\n", strerror(errno));
-        close(sock);    // Close the socket
-        exit(EXIT_FAILURE);
-    }
-
-    printf("Server is listening on port %s\n", port);
-
-    while (1)
-    {
-        struct sockaddr_in client_addr;
-        socklen_t client_len = sizeof(client_addr);
-        int client_sock = accept(sock, (struct sockaddr*)&client_addr, &client_len);
-        if (client_sock == -1)
-        {
-            perror("Accept failed");
-            close(sock);
-            return 1;
-        }
-        printf("Accepted connection\n");
-
-        while (1)
-        {
-            char buffer[8192];
-            static char request_buffer[8192] = {0}; // Adjusted buffer size to 8192 bytes
-            static int buffer_length = 0;          // Current length of data in buffer
-
-            ssize_t received = recv(client_sock, buffer, sizeof(buffer) - 1, 0);
-
-            if (received == -1)
-            {
-                perror("Receive failed");
-                break;
-            }
-
-            if (received == 0)
-            {
-                perror("Connection was closed by the client");
-                break;
-            }
-
-            if (buffer_length + received >= sizeof(request_buffer)) {
-                fprintf(stderr, "Error: Request too large\n");
-                break;
-            }
-
-            // Copy received data into request_buffer
-            memcpy(request_buffer + buffer_length, buffer, received);
-            buffer_length += received;
-            request_buffer[buffer_length] = '\0';
-
-            if (received > 0)
-            {
-                printf("Received data: %s\n", buffer);
-
-                const char *word = "\r\n\r\n";
-                char *result = strstr(request_buffer, word);
-
-                if (result != NULL)
-                {
-                    *result = '\0';
-
-                    char *body = result + 4; // Pointer at the request-body (if it exists)
-
-                    // Copy the request body into global_body
-                    strncpy(global_body, body, sizeof(global_body) - 1);
-                    global_body[sizeof(global_body) - 1] = '\0';
-
-                    int status_code = check(request_buffer);
-
-                    // Creating the response
-                    char response[16384]; // Adjusted response buffer size
-                    if (status_code == 400) {
-                        snprintf(response, sizeof(response), "HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\n\r\n");
-                    } else if (status_code == 404) {
-                        snprintf(response, sizeof(response), "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n");
-                    } else if (status_code == 413) {
-                        snprintf(response, sizeof(response), "HTTP/1.1 413 Payload Too Large\r\nContent-Length: 0\r\n\r\n");
-                    } else if (status_code == 501) {
-                        snprintf(response, sizeof(response), "HTTP/1.1 501 Not Implemented\r\nContent-Length: 0\r\n\r\n");
-                    } else if (status_code == 200) {
-                        if (strncmp(last_uri, "/static/", 8) == 0) {
-                            char *resource_name = last_uri + 8;
-
-                            // Creating response-body in relation to the resource
-                            if (strcmp(resource_name, "foo") == 0) {
-                                snprintf(response, sizeof(response), "HTTP/1.1 200 OK\r\nContent-Length: 3\r\n\r\nFoo");
-                            } else if (strcmp(resource_name, "bar") == 0) {
-                                snprintf(response, sizeof(response), "HTTP/1.1 200 OK\r\nContent-Length: 3\r\n\r\nBar");
-                            } else if (strcmp(resource_name, "baz") == 0) {
-                                snprintf(response, sizeof(response), "HTTP/1.1 200 OK\r\nContent-Length: 3\r\n\r\nBaz");
-                            } else {
-                                snprintf(response, sizeof(response), "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n");
-                            }
-                        }
-                        else if (strncmp(last_uri, "/dynamic/", 9) == 0)
-                        {
-                            // Form the dynamic response with dynamic content
-                            char *resource_name = last_uri + 9;
-                            for (int i = 0; i < resource_count; i++)
-                            {
-                                if (strcmp(dynamic_resources[i].path, resource_name) == 0)
-                                {
-                                    snprintf(response, sizeof(response), "HTTP/1.1 200 OK\r\nContent-Length: %ld\r\n\r\n%s",
-                                                strlen(dynamic_resources[i].content), dynamic_resources[i].content);
-                                    break;
-                                }
-                            }
-                        }
-                    }
-                    else if (status_code == 201) {
-                        snprintf(response, sizeof(response), "HTTP/1.1 201 Created\r\nContent-Length: 0\r\n\r\n");
-                    }
-                    else if (status_code == 403) {
-                        snprintf(response, sizeof(response), "HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\n\r\n");
-                    }
-                    else if (status_code == 204) {
-                        snprintf(response, sizeof(response), "HTTP/1.1 204 No Content\r\nContent-Length: 0\r\n\r\n");
-                    }
-                    else {
-                        snprintf(response, sizeof(response), "HTTP/1.1 500 Internal Server Error\r\nContent-Length: 0\r\n\r\n");
-                    }
-                    // Send the response
-                    int bytes_sent = send(client_sock, response, strlen(response), 0);
-
-                    if (bytes_sent == -1)
-                    {
-                        perror("Send failed");  // Send failed!
-                    }
-
-                    // Clear the buffer after it has been processed
-                    memset(request_buffer, 0, sizeof(request_buffer));
-                    buffer_length = 0;
-                    memset(global_body, 0, sizeof(global_body));
-                }
-
-            }
-        }
-
-        // Close the client socket
-        close(client_sock);
-    }
-    // Close the socket
-    close(sock);
     return 0;
 }
