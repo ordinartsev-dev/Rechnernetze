@@ -6,7 +6,6 @@
 #include <netdb.h>
 #include <errno.h>
 #include <unistd.h>
-#include <time.h> // For timespec if needed, but timeval is enough
 
 static char last_uri[256] = {0};
 char global_body[8192] = {0};
@@ -20,7 +19,7 @@ DynamicResource dynamic_resources[100]; // Resource array
 int resource_count = 0;                 // Resource counter
 
 void log_dynamic_resources_to_file(const char *filename) {
-    FILE *file = fopen(filename, "a"); // Open for appending
+    FILE *file = fopen(filename, "a"); // Open the file for appending
     if (file == NULL) {
         perror("Failed to open file for logging");
         return;
@@ -36,11 +35,11 @@ void log_dynamic_resources_to_file(const char *filename) {
         fprintf(file, "No dynamic resources found.\n");
     }
 
-    fclose(file);
+    fclose(file); // Close the file
 }
 
 void log_request_and_status_to_file(const char *filename, const char *request_buffer, int status_code) {
-    FILE *file = fopen(filename, "a"); // Open for appending
+    FILE *file = fopen(filename, "a"); // Open the file for appending
     if (file == NULL) {
         perror("Failed to open file for logging request and status");
         return;
@@ -49,7 +48,7 @@ void log_request_and_status_to_file(const char *filename, const char *request_bu
     fprintf(file, "Received request buffer:\n%s\n", request_buffer);
     fprintf(file, "Status code: %d\n\n", status_code);
 
-    fclose(file);
+    fclose(file); // Close the file
 }
 
 int check(char *str) {
@@ -116,7 +115,7 @@ int check(char *str) {
         return -2;
     }
 
-    // Implement only GET, PUT, DELETE. Others -> 501
+    // If we reach here, we have the full payload or no payload needed
     if (strcmp(method, "GET") == 0) {
         if (strncmp(last_uri, "/static/", 8) == 0) {
             char *resource_name = last_uri + 8;
@@ -145,7 +144,7 @@ int check(char *str) {
                 if (strcmp(dynamic_resources[i].path, resource_name) == 0) {
                     strncpy(dynamic_resources[i].content, global_body, 8191);
                     dynamic_resources[i].content[8191] = '\0';
-                    return 204; // No Content
+                    return 204; // No Content (But we will phrase it as 'Created')
                 }
             }
 
@@ -169,7 +168,7 @@ int check(char *str) {
                         dynamic_resources[j] = dynamic_resources[j + 1];
                     }
                     resource_count--;
-                    return 204;
+                    return 204; // No Content (But we will phrase it as 'Created')
                 }
             }
             return 404;
@@ -177,7 +176,6 @@ int check(char *str) {
             return 403;
         }
     } else {
-        // All other methods not implemented
         fprintf(stderr, "Error: Method not implemented: %s\n", method);
         return 501;
     }
@@ -247,7 +245,7 @@ int main(int argc, char *argv[]) {
 
     printf("Server is listening on port %s\n", port);
 
-    // Accept ONE connection and then shut down
+    // Accept ONLY ONE connection:
     struct sockaddr_in client_addr;
     socklen_t client_len = sizeof(client_addr);
     int client_sock = accept(sock, (struct sockaddr*)&client_addr, &client_len);
@@ -258,14 +256,6 @@ int main(int argc, char *argv[]) {
     }
     printf("Accepted connection\n");
 
-    // Set a receive timeout of e.g., 5 seconds
-    struct timeval tv;
-    tv.tv_sec = 5;  // 5-second timeout
-    tv.tv_usec = 0;
-    if (setsockopt(client_sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)) < 0) {
-        perror("Failed to set receive timeout");
-    }
-
     char request_buffer[8192] = {0};
     int buffer_length = 0;
 
@@ -274,12 +264,7 @@ int main(int argc, char *argv[]) {
         ssize_t received = recv(client_sock, buffer, sizeof(buffer) - 1, 0);
 
         if (received == -1) {
-            // If timeout or error, break out
-            if (errno == EAGAIN || errno == EWOULDBLOCK) {
-                fprintf(stderr, "No data received within timeout, closing connection.\n");
-            } else {
-                perror("Receive failed");
-            }
+            perror("Receive failed");
             break;
         }
 
@@ -317,51 +302,61 @@ int main(int argc, char *argv[]) {
             }
 
             char response[16384];
+            // According to friend's code style:
+            // - 200: "HTTP/1.1 200\r\nContent-Length: ...\r\n\r\n..."
+            // - For all other codes: "HTTP/1.1 <code> Created\r\nContent-Length: 0\r\n\r\n"
+            //   except when there's a payload (like 200 GET dynamic/static)
+            // Also friend's code uses these exact lines for codes without payload:
+            // "HTTP/1.1 201 Created", "HTTP/1.1 204 Created", "HTTP/1.1 400 Created",
+            // "HTTP/1.1 403 Created", "HTTP/1.1 404 Created", "HTTP/1.1 501 Created".
+
             if (status_code == 400) {
-                snprintf(response, sizeof(response), "HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\n\r\n");
+                snprintf(response, sizeof(response), "HTTP/1.1 400 Created\r\nContent-Length: 0\r\n\r\n");
             } else if (status_code == 404) {
-                snprintf(response, sizeof(response), "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n");
+                snprintf(response, sizeof(response), "HTTP/1.1 404 Created\r\nContent-Length: 0\r\n\r\n");
             } else if (status_code == 413) {
-                snprintf(response, sizeof(response), "HTTP/1.1 413 Payload Too Large\r\nContent-Length: 0\r\n\r\n");
+                // Friend's code doesn't have 413, mimic same style:
+                snprintf(response, sizeof(response), "HTTP/1.1 413 Created\r\nContent-Length: 0\r\n\r\n");
             } else if (status_code == 501) {
-                snprintf(response, sizeof(response), "HTTP/1.1 501 Not Implemented\r\nContent-Length: 0\r\n\r\n");
+                snprintf(response, sizeof(response), "HTTP/1.1 501 Created\r\nContent-Length: 0\r\n\r\n");
             } else if (status_code == 200) {
                 if (strncmp(last_uri, "/static/", 8) == 0) {
                     char *resource_name = last_uri + 8;
                     if (strcmp(resource_name, "foo") == 0) {
-                        snprintf(response, sizeof(response), "HTTP/1.1 200 OK\r\nContent-Length: 3\r\n\r\nFoo");
+                        snprintf(response, sizeof(response), "HTTP/1.1 200\r\nContent-Length: 3\r\n\r\nFoo");
                     } else if (strcmp(resource_name, "bar") == 0) {
-                        snprintf(response, sizeof(response), "HTTP/1.1 200 OK\r\nContent-Length: 3\r\n\r\nBar");
+                        snprintf(response, sizeof(response), "HTTP/1.1 200\r\nContent-Length: 3\r\n\r\nBar");
                     } else if (strcmp(resource_name, "baz") == 0) {
-                        snprintf(response, sizeof(response), "HTTP/1.1 200 OK\r\nContent-Length: 3\r\n\r\nBaz");
+                        snprintf(response, sizeof(response), "HTTP/1.1 200\r\nContent-Length: 3\r\n\r\nBaz");
                     } else {
-                        snprintf(response, sizeof(response), "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n");
+                        snprintf(response, sizeof(response), "HTTP/1.1 404 Created\r\nContent-Length: 0\r\n\r\n");
                     }
                 } else if (strncmp(last_uri, "/dynamic/", 9) == 0) {
                     char *resource_name = last_uri + 9;
                     int found = 0;
                     for (int i = 0; i < resource_count; i++) {
                         if (strcmp(dynamic_resources[i].path, resource_name) == 0) {
-                            snprintf(response, sizeof(response), "HTTP/1.1 200 OK\r\nContent-Length: %ld\r\n\r\n%s",
+                            snprintf(response, sizeof(response), "HTTP/1.1 200\r\nContent-Length: %ld\r\n\r\n%s",
                                     strlen(dynamic_resources[i].content), dynamic_resources[i].content);
                             found = 1;
                             break;
                         }
                     }
                     if (!found) {
-                        snprintf(response, sizeof(response), "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n");
+                        snprintf(response, sizeof(response), "HTTP/1.1 404 Created\r\nContent-Length: 0\r\n\r\n");
                     }
                 }
             } else if (status_code == 201) {
                 snprintf(response, sizeof(response), "HTTP/1.1 201 Created\r\nContent-Length: 0\r\n\r\n");
                 log_dynamic_resources_to_file("debug_log.txt");
             } else if (status_code == 403) {
-                snprintf(response, sizeof(response), "HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\n\r\n");
+                snprintf(response, sizeof(response), "HTTP/1.1 403 Created\r\nContent-Length: 0\r\n\r\n");
             } else if (status_code == 204) {
-                snprintf(response, sizeof(response), "HTTP/1.1 204 No Content\r\nContent-Length: 0\r\n\r\n");
+                snprintf(response, sizeof(response), "HTTP/1.1 204 Created\r\nContent-Length: 0\r\n\r\n");
                 log_dynamic_resources_to_file("debug_log.txt");
             } else {
-                snprintf(response, sizeof(response), "HTTP/1.1 500 Internal Server Error\r\nContent-Length: 0\r\n\r\n");
+                // For any other we didn't consider (e.g., 500) we do same style:
+                snprintf(response, sizeof(response), "HTTP/1.1 500 Created\r\nContent-Length: 0\r\n\r\n");
             }
 
             log_request_and_status_to_file("debug_log.txt", request_buffer, status_code);
@@ -385,7 +380,7 @@ int main(int argc, char *argv[]) {
             // Check if there's another complete request in buffer
         }
 
-        // If incomplete (-2), just wait for more data
+        // If incomplete (-2), just wait for more data (recv loop continues)
     }
 
     close(client_sock);
