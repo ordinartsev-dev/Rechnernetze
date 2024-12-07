@@ -6,6 +6,7 @@
 #include <netdb.h>
 #include <errno.h>
 #include <unistd.h>
+#include <time.h> // For timespec if needed, but timeval is enough
 
 static char last_uri[256] = {0};
 char global_body[8192] = {0};
@@ -19,7 +20,7 @@ DynamicResource dynamic_resources[100]; // Resource array
 int resource_count = 0;                 // Resource counter
 
 void log_dynamic_resources_to_file(const char *filename) {
-    FILE *file = fopen(filename, "a"); // Open the file for appending
+    FILE *file = fopen(filename, "a"); // Open for appending
     if (file == NULL) {
         perror("Failed to open file for logging");
         return;
@@ -35,11 +36,11 @@ void log_dynamic_resources_to_file(const char *filename) {
         fprintf(file, "No dynamic resources found.\n");
     }
 
-    fclose(file); // Close the file
+    fclose(file);
 }
 
 void log_request_and_status_to_file(const char *filename, const char *request_buffer, int status_code) {
-    FILE *file = fopen(filename, "a"); // Open the file for appending
+    FILE *file = fopen(filename, "a"); // Open for appending
     if (file == NULL) {
         perror("Failed to open file for logging request and status");
         return;
@@ -48,7 +49,7 @@ void log_request_and_status_to_file(const char *filename, const char *request_bu
     fprintf(file, "Received request buffer:\n%s\n", request_buffer);
     fprintf(file, "Status code: %d\n\n", status_code);
 
-    fclose(file); // Close the file
+    fclose(file);
 }
 
 int check(char *str) {
@@ -115,7 +116,7 @@ int check(char *str) {
         return -2;
     }
 
-    // If we reach here, we have the full payload or no payload needed
+    // Implement only GET, PUT, DELETE. Others -> 501
     if (strcmp(method, "GET") == 0) {
         if (strncmp(last_uri, "/static/", 8) == 0) {
             char *resource_name = last_uri + 8;
@@ -176,6 +177,7 @@ int check(char *str) {
             return 403;
         }
     } else {
+        // All other methods not implemented
         fprintf(stderr, "Error: Method not implemented: %s\n", method);
         return 501;
     }
@@ -245,7 +247,7 @@ int main(int argc, char *argv[]) {
 
     printf("Server is listening on port %s\n", port);
 
-    // Accept ONLY ONE connection:
+    // Accept ONE connection and then shut down
     struct sockaddr_in client_addr;
     socklen_t client_len = sizeof(client_addr);
     int client_sock = accept(sock, (struct sockaddr*)&client_addr, &client_len);
@@ -256,6 +258,14 @@ int main(int argc, char *argv[]) {
     }
     printf("Accepted connection\n");
 
+    // Set a receive timeout of e.g., 5 seconds
+    struct timeval tv;
+    tv.tv_sec = 5;  // 5-second timeout
+    tv.tv_usec = 0;
+    if (setsockopt(client_sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)) < 0) {
+        perror("Failed to set receive timeout");
+    }
+
     char request_buffer[8192] = {0};
     int buffer_length = 0;
 
@@ -264,7 +274,12 @@ int main(int argc, char *argv[]) {
         ssize_t received = recv(client_sock, buffer, sizeof(buffer) - 1, 0);
 
         if (received == -1) {
-            perror("Receive failed");
+            // If timeout or error, break out
+            if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                fprintf(stderr, "No data received within timeout, closing connection.\n");
+            } else {
+                perror("Receive failed");
+            }
             break;
         }
 
@@ -370,7 +385,7 @@ int main(int argc, char *argv[]) {
             // Check if there's another complete request in buffer
         }
 
-        // If incomplete (-2), just wait for more data (recv loop continues)
+        // If incomplete (-2), just wait for more data
     }
 
     close(client_sock);
