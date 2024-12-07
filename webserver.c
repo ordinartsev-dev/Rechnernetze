@@ -295,7 +295,7 @@ int main(int argc, char *argv[]) {
                         // Incomplete payload, continue reading from client_sock
                         // Do NOT send a response yet; just continue the recv loop
                         // Eventually, once enough data has been received, check() will return != -2.
-                        continue;
+                        break;
                     }
 
                     char response[16384];
