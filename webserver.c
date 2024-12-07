@@ -96,11 +96,11 @@ int main(int argc, char *argv[])
         }
         printf("Accepted connection\n");
 
-        // Handle multiple requests on the same connection
         char request_buffer[8192];
         int buffer_length = 0;
         memset(request_buffer, 0, sizeof(request_buffer));
 
+        // Keep reading until client closes or error occurs
         while (1) {
             char buffer[8192];
             ssize_t received = recv(client_sock, buffer, sizeof(buffer), 0);
@@ -111,11 +111,11 @@ int main(int argc, char *argv[])
             }
 
             if (received == 0) {
+                // Client closed connection
                 perror("Connection was closed by the client");
                 break;
             }
 
-            // Append new data to request_buffer
             if (buffer_length + (int)received > (int)sizeof(request_buffer)) {
                 fprintf(stderr, "Error: Request too large\n");
                 break;
@@ -123,22 +123,24 @@ int main(int argc, char *argv[])
             memcpy(request_buffer + buffer_length, buffer, received);
             buffer_length += received;
 
-            // UPDATED: Process all complete requests in the buffer
+            // Process all complete requests in request_buffer
             int processed = 1;
             while (processed) {
                 processed = 0;
                 char *header_end = strstr(request_buffer, "\r\n\r\n");
                 if (header_end) {
-                    // Temporarily end the headers at header_end
+                    // Temporarily end headers to parse them
                     *header_end = '\0';
+                    char *body_start = header_end + 4;
 
-                    // Parse headers to find Content-Length
-                    char *headers_copy = strdup(request_buffer);
+                    // Find Content-Length
                     int content_length = 0;
                     {
-                        // Quickly parse headers to find Content-Length
+                        char headers_copy[8192];
+                        strncpy(headers_copy, request_buffer, sizeof(headers_copy)-1);
+                        headers_copy[sizeof(headers_copy)-1] = '\0';
                         char *line = strtok(headers_copy, "\r\n");
-                        // First line is request line
+                        // first line is request line
                         line = strtok(NULL, "\r\n");
                         while (line) {
                             char *delim = strchr(line, ':');
@@ -155,37 +157,28 @@ int main(int argc, char *argv[])
                             line = strtok(NULL, "\r\n");
                         }
                     }
-                    free(headers_copy);
 
-                    // Check if we have the full body
-                    char *body_start = header_end + 4;
                     int header_size = (int)(body_start - request_buffer);
                     if (header_size + content_length > buffer_length) {
-                        // Not enough data received yet for the body
-                        // Restore '\r\n\r\n'
-                        // Wait for more data in outer loop
+                        // Not enough data for body
+                        // Restore and wait for more data
+                        *header_end = '\r';
                         continue;
                     }
 
-                    // We have full request (headers + body)
-                    // Extract the body
+                    // We have a full request
                     memset(global_body, 0, sizeof(global_body));
                     if (content_length > 0) {
                         memcpy(global_body, body_start, content_length);
                         global_body[content_length] = '\0';
                     }
 
-                    // Null-terminate headers cleanly again
-                    *header_end = '\0';
-
-                    // Call check
+                    // Now we can safely call check
                     int status_code = check(request_buffer);
 
-                    // Build response
+                    // Create response
                     char response[16384];
                     memset(response, 0, sizeof(response));
-
-                    // Default response if not set by conditions below
                     snprintf(response, sizeof(response), "HTTP/1.1 500 Internal Server Error\r\nContent-Length: 0\r\n\r\n");
 
                     if (status_code == 400) {
@@ -236,9 +229,14 @@ int main(int argc, char *argv[])
                     int bytes_sent = send(client_sock, response, strlen(response), 0);
                     if (bytes_sent == -1) {
                         perror("Send failed");
+                        break; // break from connection loop
                     }
 
-                    // UPDATED: Move leftover data (if any) to the front of request_buffer
+                    // Clear global arrays for next request
+                    memset(global_body, 0, sizeof(global_body));
+                    memset(last_uri, 0, sizeof(last_uri));
+
+                    // Move leftover data to front of request_buffer
                     int total_request_size = header_size + content_length;
                     int leftover = buffer_length - total_request_size;
                     if (leftover > 0) {
@@ -246,16 +244,12 @@ int main(int argc, char *argv[])
                     }
                     buffer_length = leftover;
 
-                    // Clear global arrays for next request
-                    memset(global_body, 0, sizeof(global_body));
-                    memset(last_uri, 0, sizeof(last_uri));
-
                     processed = 1;
                 }
             }
         }
 
-        // Close the client socket after finishing
+        // Close the client socket
         close(client_sock);
     }
 
@@ -269,19 +263,16 @@ int check(char *str) {
         return -1;
     }
 
-    // Variables for the start line
     char method[16], version[16];
     int content_length = 0;
 
     // Extract the start line
     char *line = strtok(str, "\r\n");
     if (line == NULL || sscanf(line, "%15s %255s %15s", method, last_uri, version) != 3) {
-        // Incorrect start line
         fprintf(stderr, "Error: Invalid request line\n");
         return 400;
     }
 
-    // Check headers
     int header_count = 0;
     char *header = strtok(NULL, "\r\n");
     while (header) {
@@ -383,10 +374,11 @@ int check(char *str) {
         } else {
             return 403;
         }
-
     } else {
+        // For HEAD or other methods not implemented
         fprintf(stderr, "Error: Method not implemented: %s\n", method);
-        return 501; // This method is not implemented
+        return 501; // Not implemented
     }
+
     return 0;
 }
