@@ -309,7 +309,7 @@ int main(int argc, char *argv[])
                     int status_code = check(request_buffer);
 
                     // Creating the response
-                    char response[8192]; // Adjusted response buffer size
+                    char response[16384]; // Adjusted response buffer size
                     if (status_code == 400) {
                         snprintf(response, sizeof(response), "HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\n\r\n");
                     } else if (status_code == 404) {
@@ -371,6 +371,7 @@ int main(int argc, char *argv[])
                     // Clear the buffer after it has been processed
                     memset(request_buffer, 0, sizeof(request_buffer));
                     buffer_length = 0;
+                    memset(global_body, 0, sizeof(global_body));
                 }
 
             }
