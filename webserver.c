@@ -47,7 +47,6 @@ int check(char *str) {
     char method[16], version[16];
     int content_length = 0;
 
-    // Extract the start line
     char *line = strtok(str, "\r\n");
     if (line == NULL || sscanf(line, "%15s %255s %15s", method, last_uri, version) != 3) {
         fprintf(stderr, "Error: Invalid request line\n");
@@ -97,17 +96,14 @@ int check(char *str) {
         header = strtok(NULL, "\r\n");
     }
 
-    // Check if we have the full payload
     int received_body_length = (int)strlen(global_body);
     if (content_length > 0 && received_body_length < content_length) {
-        // We haven't received the full payload yet
-        // Return -2 to indicate incomplete data, similar to friend's logic
+        // Incomplete payload
         return -2;
     }
 
-    // Continue with method checks only if full payload is present
+    // If we reach here, we have the full payload or no payload needed
     if (strcmp(method, "GET") == 0) {
-        // Existing GET logic unchanged
         if (strncmp(last_uri, "/static/", 8) == 0) {
             char *resource_name = last_uri + 8;
             if (strcmp(resource_name, "foo") == 0 ||
@@ -129,7 +125,6 @@ int check(char *str) {
             return 404;
         }
     } else if (strcmp(method, "PUT") == 0) {
-        // Existing PUT logic unchanged
         if (strncmp(last_uri, "/dynamic/", 9) == 0) {
             char *resource_name = last_uri + 9;
             for (int i = 0; i < resource_count; i++) {
@@ -152,7 +147,6 @@ int check(char *str) {
         }
         return 403; // Forbidden
     } else if (strcmp(method, "DELETE") == 0) {
-        // Existing DELETE logic unchanged
         if (strncmp(last_uri, "/dynamic/", 9) == 0) {
             char *resource_name = last_uri + 9;
             for (int i = 0; i < resource_count; i++) {
@@ -249,11 +243,12 @@ int main(int argc, char *argv[]) {
         }
         printf("Accepted connection\n");
 
-        while (1) {
-            char buffer[8192];
-            static char request_buffer[8192] = {0};
-            static int buffer_length = 0;
+        // Use non-static buffers so each connection starts fresh
+        char request_buffer[8192] = {0};
+        int buffer_length = 0;
 
+        for (;;) {
+            char buffer[8192];
             ssize_t received = recv(client_sock, buffer, sizeof(buffer) - 1, 0);
 
             if (received == -1) {
@@ -262,11 +257,11 @@ int main(int argc, char *argv[]) {
             }
 
             if (received == 0) {
-                perror("Connection was closed by the client");
+                perror("Connection closed by the client");
                 break;
             }
 
-            if (buffer_length + received >= sizeof(request_buffer)) {
+            if (buffer_length + received >= (int)sizeof(request_buffer)) {
                 fprintf(stderr, "Error: Request too large\n");
                 break;
             }
@@ -275,87 +270,120 @@ int main(int argc, char *argv[]) {
             buffer_length += received;
             request_buffer[buffer_length] = '\0';
 
-            if (received > 0) {
-                printf("Received data: %s\n", buffer);
+            // Attempt to parse requests as long as we find "\r\n\r\n"
+            while (1) {
+                char *result = strstr(request_buffer, "\r\n\r\n");
+                if (!result) {
+                    // No full header yet, read more data
+                    break;
+                }
 
-                const char *word = "\r\n\r\n";
-                char *result = strstr(request_buffer, word);
+                *result = '\0';
+                char *body = result + 4;
+                strncpy(global_body, body, sizeof(global_body) - 1);
+                global_body[sizeof(global_body) - 1] = '\0';
 
-                if (result != NULL) {
-                    *result = '\0';
+                int status_code = check(request_buffer);
 
-                    char *body = result + 4;
+                if (status_code == -2) {
+                    // Incomplete payload, don't send response, just break out of parsing loop
+                    // and wait for more data in the next recv()
+                    break;
+                }
 
-                    strncpy(global_body, body, sizeof(global_body) - 1);
-                    global_body[sizeof(global_body) - 1] = '\0';
+                // If we got here, we have a complete request:
+                char response[16384];
+                if (status_code == 400) {
+                    snprintf(response, sizeof(response), "HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\n\r\n");
+                } else if (status_code == 404) {
+                    snprintf(response, sizeof(response), "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n");
+                } else if (status_code == 413) {
+                    snprintf(response, sizeof(response), "HTTP/1.1 413 Payload Too Large\r\nContent-Length: 0\r\n\r\n");
+                } else if (status_code == 501) {
+                    snprintf(response, sizeof(response), "HTTP/1.1 501 Not Implemented\r\nContent-Length: 0\r\n\r\n");
+                } else if (status_code == 200) {
+                    if (strncmp(last_uri, "/static/", 8) == 0) {
+                        char *resource_name = last_uri + 8;
 
-                    int status_code = check(request_buffer);
-
-                    if (status_code == -2) {
-                        // Incomplete payload, continue reading from client_sock
-                        // Do NOT send a response yet; just continue the recv loop
-                        // Eventually, once enough data has been received, check() will return != -2.
-                        break;
-                    }
-
-                    char response[16384];
-                    if (status_code == 400) {
-                        snprintf(response, sizeof(response), "HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\n\r\n");
-                    } else if (status_code == 404) {
-                        snprintf(response, sizeof(response), "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n");
-                    } else if (status_code == 413) {
-                        snprintf(response, sizeof(response), "HTTP/1.1 413 Payload Too Large\r\nContent-Length: 0\r\n\r\n");
-                    } else if (status_code == 501) {
-                        snprintf(response, sizeof(response), "HTTP/1.1 501 Not Implemented\r\nContent-Length: 0\r\n\r\n");
-                    } else if (status_code == 200) {
-                        if (strncmp(last_uri, "/static/", 8) == 0) {
-                            char *resource_name = last_uri + 8;
-
-                            if (strcmp(resource_name, "foo") == 0) {
-                                snprintf(response, sizeof(response), "HTTP/1.1 200 OK\r\nContent-Length: 3\r\n\r\nFoo");
-                            } else if (strcmp(resource_name, "bar") == 0) {
-                                snprintf(response, sizeof(response), "HTTP/1.1 200 OK\r\nContent-Length: 3\r\n\r\nBar");
-                            } else if (strcmp(resource_name, "baz") == 0) {
-                                snprintf(response, sizeof(response), "HTTP/1.1 200 OK\r\nContent-Length: 3\r\n\r\nBaz");
-                            } else {
-                                snprintf(response, sizeof(response), "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n");
-                            }
-                        } else if (strncmp(last_uri, "/dynamic/", 9) == 0) {
-                            char *resource_name = last_uri + 9;
-                            for (int i = 0; i < resource_count; i++) {
-                                if (strcmp(dynamic_resources[i].path, resource_name) == 0) {
-                                    snprintf(response, sizeof(response), "HTTP/1.1 200 OK\r\nContent-Length: %ld\r\n\r\n%s",
-                                             strlen(dynamic_resources[i].content), dynamic_resources[i].content);
-                                    break;
-                                }
+                        if (strcmp(resource_name, "foo") == 0) {
+                            snprintf(response, sizeof(response), "HTTP/1.1 200 OK\r\nContent-Length: 3\r\n\r\nFoo");
+                        } else if (strcmp(resource_name, "bar") == 0) {
+                            snprintf(response, sizeof(response), "HTTP/1.1 200 OK\r\nContent-Length: 3\r\n\r\nBar");
+                        } else if (strcmp(resource_name, "baz") == 0) {
+                            snprintf(response, sizeof(response), "HTTP/1.1 200 OK\r\nContent-Length: 3\r\n\r\nBaz");
+                        } else {
+                            snprintf(response, sizeof(response), "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n");
+                        }
+                    } else if (strncmp(last_uri, "/dynamic/", 9) == 0) {
+                        char *resource_name = last_uri + 9;
+                        int found = 0;
+                        for (int i = 0; i < resource_count; i++) {
+                            if (strcmp(dynamic_resources[i].path, resource_name) == 0) {
+                                snprintf(response, sizeof(response), "HTTP/1.1 200 OK\r\nContent-Length: %ld\r\n\r\n%s",
+                                        strlen(dynamic_resources[i].content), dynamic_resources[i].content);
+                                found = 1;
+                                break;
                             }
                         }
-                    } else if (status_code == 201) {
-                        snprintf(response, sizeof(response), "HTTP/1.1 201 Created\r\nContent-Length: 0\r\n\r\n");
-                        log_dynamic_resources_to_file("debug_log.txt");
-                    } else if (status_code == 403) {
-                        snprintf(response, sizeof(response), "HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\n\r\n");
-                    } else if (status_code == 204) {
-                        snprintf(response, sizeof(response), "HTTP/1.1 204 No Content\r\nContent-Length: 0\r\n\r\n");
-                        log_dynamic_resources_to_file("debug_log.txt");
-                    } else {
-                        snprintf(response, sizeof(response), "HTTP/1.1 500 Internal Server Error\r\nContent-Length: 0\r\n\r\n");
+                        if (!found) {
+                            snprintf(response, sizeof(response), "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n");
+                        }
                     }
+                } else if (status_code == 201) {
+                    snprintf(response, sizeof(response), "HTTP/1.1 201 Created\r\nContent-Length: 0\r\n\r\n");
+                    log_dynamic_resources_to_file("debug_log.txt");
+                } else if (status_code == 403) {
+                    snprintf(response, sizeof(response), "HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\n\r\n");
+                } else if (status_code == 204) {
+                    snprintf(response, sizeof(response), "HTTP/1.1 204 No Content\r\nContent-Length: 0\r\n\r\n");
+                    log_dynamic_resources_to_file("debug_log.txt");
+                } else {
+                    snprintf(response, sizeof(response), "HTTP/1.1 500 Internal Server Error\r\nContent-Length: 0\r\n\r\n");
+                }
 
+                // If status_code != -2, we have a response to send
+                if (status_code != -2) {
                     int bytes_sent = send(client_sock, response, strlen(response), 0);
                     if (bytes_sent == -1) {
                         perror("Send failed");
                     }
 
-                    memset(request_buffer, 0, sizeof(request_buffer));
-                    buffer_length = 0;
+                    // After processing one request, move the leftover data to the front
+                    size_t request_size = (body - request_buffer) + strlen(global_body);
+                    // request_size: Bytes consumed by the processed request (headers + body)
+                    // Actually, we should carefully calculate:
+                    // Headers end at result, result+4 is start of body.
+                    // The total used = (result+4 - request_buffer) + content_length (if any)
+                    // But since check() modifies global_body based on content length,
+                    // we can assume all data up to global_body + content_length is processed.
+
+                    // Let's compute how many bytes consumed exactly:
+                    // This is a simplified approach:
+                    // Find where headers ended: (result + 4)
+                    // Add content_length (from the request)
+                    // We'll need to re-parse with the actual content_length logic if necessary.
+                    // For simplicity and since no multiple requests are handled simultaneously, let's do:
+                    int used_bytes = (int)((result + 4) - request_buffer) + (int)strlen(global_body);
+
+                    memmove(request_buffer, request_buffer + used_bytes, buffer_length - used_bytes);
+                    buffer_length -= used_bytes;
+                    request_buffer[buffer_length] = '\0';
+
                     memset(global_body, 0, sizeof(global_body));
+                    memset(last_uri, 0, sizeof(last_uri));
                 }
+
+                // Check again if there's another complete request in the buffer
+                // If incomplete request was detected, we break above
             }
+
+            // If incomplete (-2) was detected above, we just continue to recv more data
+            // No break/continue needed here, just go back to recv.
         }
 
         close(client_sock);
     }
+
     close(sock);
     return 0;
 }

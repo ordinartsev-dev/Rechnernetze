@@ -1,5 +1,0 @@
-/Users/egorordinarcev/untitled/cmake-build-debug/CMakeFiles/webserver.dir
-/Users/egorordinarcev/untitled/cmake-build-debug/CMakeFiles/package.dir
-/Users/egorordinarcev/untitled/cmake-build-debug/CMakeFiles/package_source.dir
-/Users/egorordinarcev/untitled/cmake-build-debug/CMakeFiles/edit_cache.dir
-/Users/egorordinarcev/untitled/cmake-build-debug/CMakeFiles/rebuild_cache.dir
