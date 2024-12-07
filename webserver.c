@@ -299,7 +299,6 @@ int main(int argc, char *argv[])
                 if (result != NULL)
                 {
                     *result = '\0';
-                    *(result + 1) = '\0';
 
                     char *body = result + 4; // Pointer at the request-body (if it exists)
 
