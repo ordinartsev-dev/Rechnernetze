@@ -372,6 +372,7 @@ int main(int argc, char *argv[])
                     // Clear the buffer after it has been processed
                     memset(request_buffer, 0, sizeof(request_buffer));
                     buffer_length = 0;
+                    memset(global_body, 0, sizeof(global_body));
                 }
 
             }
