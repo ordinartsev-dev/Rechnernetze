@@ -280,10 +280,9 @@ int main(int argc, char *argv[])
         printf("Accepted connection\n");
         static char request_buffer[8192] = {0}; // Adjusted buffer size to 8192 bytes
         static int buffer_length = 0;          // Current length of data in buffer
+        char buffer[8192];
         while (1)
         {
-            char buffer[8192];
-
             ssize_t received = recv(client_sock, buffer, sizeof(buffer) - 1, 0);
 
             if (received == -1)
