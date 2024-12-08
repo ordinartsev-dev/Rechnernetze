@@ -369,7 +369,14 @@ int main(int argc, char *argv[]) {
 
             log_request_and_status_to_file("debug_log.txt", request_buffer, status_code, response);
 
-            send(client_sock, response, strlen(response), 0);
+            //send(client_sock, response, strlen(response), 0);
+
+            int bytes_sent = send(client_sock, response, strlen(response), 0);
+
+            if (bytes_sent == -1)
+            {
+                perror("Send failed");  // Send failed!
+            }
 
             // Remove headers + body
             int remove_len = total_needed;
