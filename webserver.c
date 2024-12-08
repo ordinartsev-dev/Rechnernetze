@@ -20,80 +20,22 @@ typedef struct {
 DynamicResource dynamic_resources[100]; // Resource array
 int resource_count = 0;                 // Resource counter
 
-int get_content_length(const char *buffer) {
-    if (buffer == NULL) {
-        fprintf(stderr, "Error: NULL string passed\n");
-        return -1; // Indicates error
-    }
+int get_content_length(const char *request) {
+    char *request_copy = strdup(request);
+    char *content_length_str = strstr(request_copy, "Content-Length:");
 
-    int content_length = 0;
+    if (content_length_str != NULL) {
+        content_length_str += 15;
 
-    // Use a copy of the buffer for tokenization since `strtok` modifies the string
-    char *buffer_copy = strdup(buffer);
-    if (!buffer_copy) {
-        fprintf(stderr, "Error: Memory allocation failed\n");
-        return -1;
-    }
-
-    // Extract the start line
-    char *line = strtok(buffer_copy, "\r\n");
-    if (line == NULL) {
-        fprintf(stderr, "Error: Invalid request format\n");
-        free(buffer_copy);
-        return -1;
-    }
-
-    // Process headers
-    int header_count = 0;
-    char *header = strtok(NULL, "\r\n");
-    while (header) {
-        if (header_count >= 40) {
-            fprintf(stderr, "Error: Too many headers\n");
-            free(buffer_copy);
-            return -1;
-        }
-        header_count++;
-
-        // Find the ':' delimiter
-        char *delimiter = strchr(header, ':');
-        if (!delimiter) {
-            fprintf(stderr, "Error: Invalid header format: %s\n", header);
-            free(buffer_copy);
-            return -1;
+        while (*content_length_str == ' ' || *content_length_str == '\t') {
+            content_length_str++;
         }
 
-        // Split the header key and value
-        *delimiter = '\0';
-        char *key = header;
-        char *value = delimiter + 1;
-
-        // Trim leading spaces from the value
-        while (isspace((unsigned char)*value)) value++;
-
-        // Validate header lengths
-        if (strlen(key) > 256 || strlen(value) > 256) {
-            fprintf(stderr, "Error: Header too long: %s\n", key);
-            free(buffer_copy);
-            return -1;
-        }
-
-        // Check for Content-Length
-        if (strcasecmp(key, "Content-Length") == 0) {
-            content_length = atoi(value);
-            if (content_length > 8192) {
-                fprintf(stderr, "Error: Content-Length too large\n");
-                free(buffer_copy);
-                return -1;
-            }
-            break; // No need to parse further headers
-        }
-
-        // Proceed to the next header
-        header = strtok(NULL, "\r\n");
+        free(request_copy);
+        return atoi(content_length_str);
     }
-
-    free(buffer_copy);
-    return content_length;
+    free(request_copy);
+    return 0;
 }
 
 int check(char *str) {
@@ -336,12 +278,11 @@ int main(int argc, char *argv[])
             return 1;
         }
         printf("Accepted connection\n");
-
+        static char request_buffer[8192] = {0}; // Adjusted buffer size to 8192 bytes
+        static int buffer_length = 0;          // Current length of data in buffer
         while (1)
         {
             char buffer[8192];
-            static char request_buffer[8192] = {0}; // Adjusted buffer size to 8192 bytes
-            static int buffer_length = 0;          // Current length of data in buffer
 
             ssize_t received = recv(client_sock, buffer, sizeof(buffer) - 1, 0);
 
@@ -373,12 +314,10 @@ int main(int argc, char *argv[])
 
                 const char *word = "\r\n\r\n";
                 char *result = strstr(request_buffer, word);
-                
-                int payload_len = -1; 
-                int content_length = 0;
 
-                if (result != NULL)
-                {
+                int payload_len = -1;
+                int content_length = 0;
+                if(result != NULL){
                     content_length = get_content_length(request_buffer);
                     payload_len = (result - request_buffer) + strlen(word);
                 }
