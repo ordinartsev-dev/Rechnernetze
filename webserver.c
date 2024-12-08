@@ -9,7 +9,7 @@
 
 static char last_uri[256] = {0};
 char global_body[8192] = {0};
-int last_content_length = 0; // Store content_length of the last processed request
+int last_content_length = 0; // Store content_length for the last processed request
 
 typedef struct {
     char path[256];
@@ -51,15 +51,15 @@ void log_request_and_status_to_file(const char *filename, const char *request_bu
     fclose(file);
 }
 
-int check(char *str) {
+// Modified check to return content_length as well
+int check_request(char *str, int *content_length_out) {
     if (str == NULL) {
-        fprintf(stderr, "Error: NULL string passed\n");
         return -1;
     }
 
     char method[16], version[16];
     int content_length = 0;
-    last_content_length = 0; // reset for this request
+    *content_length_out = 0;
 
     char *line = strtok(str, "\r\n");
     if (!line || sscanf(line, "%15s %255s %15s", method, last_uri, version) != 3) {
@@ -100,13 +100,12 @@ int check(char *str) {
 
     int received_body_length = (int)strlen(global_body);
     if (content_length > 0 && received_body_length < content_length) {
-        // Incomplete
-        return -2;
+        return -2; // Incomplete
     }
 
-    last_content_length = content_length;
+    *content_length_out = content_length;
 
-    // Support only GET, PUT, DELETE; others 501
+    // Only GET, PUT, DELETE are supported; others => 501
     if (strcmp(method, "GET") == 0) {
         if (strncmp(last_uri, "/static/", 8) == 0) {
             char *resource_name = last_uri + 8;
@@ -166,7 +165,6 @@ int check(char *str) {
             return 403;
         }
     } else {
-        // HEAD or others not implemented
         return 501;
     }
 
@@ -237,8 +235,8 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
-    // Increase timeout to handle slow tests
-    struct timeval tv = { .tv_sec = 3, .tv_usec = 0 };
+    // Increase timeout even more to ensure the test has time
+    struct timeval tv = { .tv_sec = 5, .tv_usec = 0 };
     setsockopt(client_sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
 
     char request_buffer[8192] = {0};
@@ -249,7 +247,7 @@ int main(int argc, char *argv[]) {
         ssize_t received = recv(client_sock, buffer, sizeof(buffer) - 1, 0);
         if (received == -1) {
             if (errno == EAGAIN || errno == EWOULDBLOCK) {
-                // Timeout, no more requests
+                // Timeout, no more requests, close gracefully
                 break;
             } else {
                 perror("Receive failed");
@@ -285,11 +283,12 @@ int main(int argc, char *argv[]) {
             strncpy(global_body, body, sizeof(global_body) - 1);
             global_body[sizeof(global_body) - 1] = '\0';
 
-            int status_code = check(request_buffer);
+            int content_length = 0;
+            int status_code = check_request(request_buffer, &content_length);
 
             char response[16384];
             if (status_code == -2) {
-                // Incomplete, restore and wait
+                // Incomplete, restore and wait for more data
                 *end_of_headers = '\r';
                 break;
             } else if (status_code == 400) {
@@ -338,6 +337,7 @@ int main(int argc, char *argv[]) {
                 snprintf(response, sizeof(response), "HTTP/1.1 204 No Content\r\nContent-Length: 0\r\n\r\n");
                 log_dynamic_resources_to_file("debug_log.txt");
             } else {
+                // Internal Error or unknown status
                 snprintf(response, sizeof(response), "HTTP/1.1 500 Internal Server Error\r\nContent-Length: 0\r\n\r\n");
             }
 
@@ -345,16 +345,16 @@ int main(int argc, char *argv[]) {
 
             send(client_sock, response, strlen(response), 0);
 
-            int remove_len = (int)((end_of_headers + 4) - request_buffer) + last_content_length;
+            // Remove exactly headers + content_length bytes
+            int remove_len = (int)((end_of_headers + 4) - request_buffer) + content_length;
             if (remove_len > buffer_length) {
-                remove_len = buffer_length;
+                remove_len = buffer_length; // safety
             }
             memmove(request_buffer, request_buffer + remove_len, buffer_length - remove_len);
             buffer_length -= remove_len;
             request_buffer[buffer_length] = '\0';
             memset(global_body, 0, sizeof(global_body));
             memset(last_uri, 0, sizeof(last_uri));
-            last_content_length = 0;
         }
     }
 
