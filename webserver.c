@@ -254,10 +254,11 @@ int main(int argc, char *argv[]) {
             int headers_len = (int)((end_of_headers + 4) - request_buffer);
 
             int content_length = 0;
+            // Temporarily null-terminate headers
             char saved_char = *end_of_headers;
-            *end_of_headers = '\0'; // isolate headers
+            *end_of_headers = '\0';
             int status_code = check_request(request_buffer, &content_length);
-            *end_of_headers = saved_char; // restore
+            *end_of_headers = saved_char;
 
             int total_needed = headers_len + content_length;
             if (buffer_length < total_needed) {
@@ -265,7 +266,7 @@ int main(int argc, char *argv[]) {
                 break;
             }
 
-            // We have full body now
+            // Now we have full request (headers+body)
             char *body = request_buffer + headers_len;
             memset(global_body, 0, sizeof(global_body));
             if (content_length > 0) {
@@ -280,7 +281,7 @@ int main(int argc, char *argv[]) {
                 global_body[0] = '\0';
             }
 
-            // If PUT /dynamic/... initially returned 0, determine final status now
+            // Finalize PUT if deferred
             if (status_code == 0 && strncmp(last_uri, "/dynamic/", 9) == 0) {
                 char *resource_name = last_uri + 9;
                 int found = 0;

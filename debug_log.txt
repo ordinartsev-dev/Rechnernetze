@@ -9452,3 +9452,243 @@ Received request buffer:
 GET /dynamic/bc34cf1811d71d6d HTTP/1.1
 Status code: 404
 
+Received request buffer:
+Request
+
+
+Status code: 400
+
+Received request buffer:
+GET / HTTP/1.1
+
+
+Status code: 404
+
+Received request buffer:
+GET / HTTP/1.1
+Status code: 404
+
+Received request buffer:
+Request
+
+
+Status code: 400
+
+Received request buffer:
+HEAD /index.html HTTP/1.1
+Status code: 501
+
+Received request buffer:
+GET /index.html HTTP/1.1
+Status code: 404
+
+Received request buffer:
+GET /static/foo HTTP/1.1
+Status code: 200
+
+Received request buffer:
+GET /static/bar HTTP/1.1
+Status code: 200
+
+Received request buffer:
+GET /static/baz HTTP/1.1
+Status code: 200
+
+Received request buffer:
+GET /static/other HTTP/1.1
+Status code: 404
+
+Received request buffer:
+GET /static/anything HTTP/1.1
+Status code: 404
+
+Received request buffer:
+GET /static/else HTTP/1.1
+Status code: 404
+
+Received request buffer:
+GET /dynamic/927e4295de060707 HTTP/1.1
+Status code: 404
+
+Current dynamic resources:
+Resource 1:
+  Path: 927e4295de060707
+  Content: 9890a7c38d54983260ca5122d871d5359855a1ca42427aacdc6ab23cccf218b8
+Received request buffer:
+PUT /dynamic/927e4295de060707 HTTP/1.1
+Status code: 201
+
+Received request buffer:
+GET /dynamic/927e4295de060707 HTTP/1.1
+Status code: 200
+
+Current dynamic resources:
+No dynamic resources found.
+Received request buffer:
+DELETE /dynamic/927e4295de060707 HTTP/1.1
+Status code: 204
+
+Received request buffer:
+GET /dynamic/927e4295de060707 HTTP/1.1
+Status code: 404
+
+Received request buffer:
+Request
+
+
+Status code: 400
+
+Received request buffer:
+GET / HTTP/1.1
+
+
+Status code: 404
+
+Received request buffer:
+GET / HTTP/1.1
+Status code: 404
+
+Received request buffer:
+Request
+
+
+Status code: 400
+
+Received request buffer:
+HEAD /index.html HTTP/1.1
+Status code: 501
+
+Received request buffer:
+GET /index.html HTTP/1.1
+Status code: 404
+
+Received request buffer:
+GET /static/foo HTTP/1.1
+Status code: 200
+
+Received request buffer:
+GET /static/bar HTTP/1.1
+Status code: 200
+
+Received request buffer:
+GET /static/baz HTTP/1.1
+Status code: 200
+
+Received request buffer:
+GET /static/other HTTP/1.1
+Status code: 404
+
+Received request buffer:
+GET /static/anything HTTP/1.1
+Status code: 404
+
+Received request buffer:
+GET /static/else HTTP/1.1
+Status code: 404
+
+Received request buffer:
+GET /dynamic/a5462dddfa7f670f HTTP/1.1
+Status code: 404
+
+Current dynamic resources:
+Resource 1:
+  Path: a5462dddfa7f670f
+  Content: dde2fc13709c6c811461fcb909bbfb183adba404eb15f739b7941f1cda3d29af
+Received request buffer:
+PUT /dynamic/a5462dddfa7f670f HTTP/1.1
+Status code: 201
+
+Received request buffer:
+GET /dynamic/a5462dddfa7f670f HTTP/1.1
+Status code: 200
+
+Current dynamic resources:
+No dynamic resources found.
+Received request buffer:
+DELETE /dynamic/a5462dddfa7f670f HTTP/1.1
+Status code: 204
+
+Received request buffer:
+GET /dynamic/a5462dddfa7f670f HTTP/1.1
+Status code: 404
+
+Received request buffer:
+Request
+
+
+Status code: 400
+
+Received request buffer:
+GET / HTTP/1.1
+
+
+Status code: 404
+
+Received request buffer:
+GET / HTTP/1.1
+Status code: 404
+
+Received request buffer:
+Request
+
+
+Status code: 400
+
+Received request buffer:
+HEAD /index.html HTTP/1.1
+Status code: 501
+
+Received request buffer:
+GET /index.html HTTP/1.1
+Status code: 404
+
+Received request buffer:
+GET /static/foo HTTP/1.1
+Status code: 200
+
+Received request buffer:
+GET /static/bar HTTP/1.1
+Status code: 200
+
+Received request buffer:
+GET /static/baz HTTP/1.1
+Status code: 200
+
+Received request buffer:
+GET /static/other HTTP/1.1
+Status code: 404
+
+Received request buffer:
+GET /static/anything HTTP/1.1
+Status code: 404
+
+Received request buffer:
+GET /static/else HTTP/1.1
+Status code: 404
+
+Received request buffer:
+GET /dynamic/7d38892a9c7fcf6b HTTP/1.1
+Status code: 404
+
+Current dynamic resources:
+Resource 1:
+  Path: 7d38892a9c7fcf6b
+  Content: e7ece2fb9aa15145fa548bfff3abbbd2c094fcde8328325af4c11d49d71fa132
+Received request buffer:
+PUT /dynamic/7d38892a9c7fcf6b HTTP/1.1
+Status code: 201
+
+Received request buffer:
+GET /dynamic/7d38892a9c7fcf6b HTTP/1.1
+Status code: 200
+
+Current dynamic resources:
+No dynamic resources found.
+Received request buffer:
+DELETE /dynamic/7d38892a9c7fcf6b HTTP/1.1
+Status code: 204
+
+Received request buffer:
+GET /dynamic/7d38892a9c7fcf6b HTTP/1.1
+Status code: 404
+
