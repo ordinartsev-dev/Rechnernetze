@@ -38,7 +38,7 @@ void log_dynamic_resources_to_file(const char *filename) {
     fclose(file);
 }
 
-void log_request_and_status_to_file(const char *filename, const char *request_buffer, int status_code) {
+void log_request_and_status_to_file(const char *filename, const char *request_buffer, int status_code, const char *response) {
     FILE *file = fopen(filename, "a");
     if (!file) {
         perror("Failed to open file for logging request and status");
@@ -46,9 +46,12 @@ void log_request_and_status_to_file(const char *filename, const char *request_bu
     }
 
     fprintf(file, "Received request buffer:\n%s\n", request_buffer);
-    fprintf(file, "Status code: %d\n\n", status_code);
+    fprintf(file, "Status code: %d\n", status_code);
+    fprintf(file, "Response: %s\n\n", response);
+
     fclose(file);
 }
+
 
 // Parses request headers and determines initial status, deferring PUT resource creation/update until body is read.
 int check_request(char *str, int *content_length_out) {
@@ -364,7 +367,7 @@ int main(int argc, char *argv[]) {
                 snprintf(response, sizeof(response), "HTTP/1.1 500 Internal Server Error\r\nContent-Length: 0\r\n\r\n");
             }
 
-            log_request_and_status_to_file("debug_log.txt", request_buffer, status_code);
+            log_request_and_status_to_file("debug_log.txt", request_buffer, status_code, response);
 
             send(client_sock, response, strlen(response), 0);
 

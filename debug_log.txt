@@ -9772,3 +9772,151 @@ Received request buffer:
 GET /dynamic/bba03747308b1499 HTTP/1.1
 Status code: 404
 
+Received request buffer:
+Request
+
+
+Status code: 400
+Response: HTTP/1.1 400 Bad Request
+Content-Length: 0
+
+
+
+Received request buffer:
+GET / HTTP/1.1
+
+
+Status code: 404
+Response: HTTP/1.1 404 Not Found
+Content-Length: 0
+
+
+
+Received request buffer:
+GET / HTTP/1.1
+Status code: 404
+Response: HTTP/1.1 404 Not Found
+Content-Length: 0
+
+
+
+Received request buffer:
+Request
+
+
+Status code: 400
+Response: HTTP/1.1 400 Bad Request
+Content-Length: 0
+
+
+
+Received request buffer:
+HEAD /index.html HTTP/1.1
+Status code: 501
+Response: HTTP/1.1 501 Not Implemented
+Content-Length: 0
+
+
+
+Received request buffer:
+GET /index.html HTTP/1.1
+Status code: 404
+Response: HTTP/1.1 404 Not Found
+Content-Length: 0
+
+
+
+Received request buffer:
+GET /static/foo HTTP/1.1
+Status code: 200
+Response: HTTP/1.1 200 OK
+Content-Length: 3
+
+Foo
+
+Received request buffer:
+GET /static/bar HTTP/1.1
+Status code: 200
+Response: HTTP/1.1 200 OK
+Content-Length: 3
+
+Bar
+
+Received request buffer:
+GET /static/baz HTTP/1.1
+Status code: 200
+Response: HTTP/1.1 200 OK
+Content-Length: 3
+
+Baz
+
+Received request buffer:
+GET /static/other HTTP/1.1
+Status code: 404
+Response: HTTP/1.1 404 Not Found
+Content-Length: 0
+
+
+
+Received request buffer:
+GET /static/anything HTTP/1.1
+Status code: 404
+Response: HTTP/1.1 404 Not Found
+Content-Length: 0
+
+
+
+Received request buffer:
+GET /static/else HTTP/1.1
+Status code: 404
+Response: HTTP/1.1 404 Not Found
+Content-Length: 0
+
+
+
+Received request buffer:
+GET /dynamic/52a8951ee1ae63b0 HTTP/1.1
+Status code: 404
+Response: HTTP/1.1 404 Not Found
+Content-Length: 0
+
+
+
+Current dynamic resources:
+Resource 1:
+  Path: 52a8951ee1ae63b0
+  Content: 0aad054cd5d0809f2cc72f6ce9c1be7f2f4a845dda5b18f915d8a41b08ffb5aa
+Received request buffer:
+PUT /dynamic/52a8951ee1ae63b0 HTTP/1.1
+Status code: 201
+Response: HTTP/1.1 201 Created
+Content-Length: 0
+
+
+
+Received request buffer:
+GET /dynamic/52a8951ee1ae63b0 HTTP/1.1
+Status code: 200
+Response: HTTP/1.1 200 OK
+Content-Length: 64
+
+0aad054cd5d0809f2cc72f6ce9c1be7f2f4a845dda5b18f915d8a41b08ffb5aa
+
+Current dynamic resources:
+No dynamic resources found.
+Received request buffer:
+DELETE /dynamic/52a8951ee1ae63b0 HTTP/1.1
+Status code: 204
+Response: HTTP/1.1 204 No Content
+Content-Length: 0
+
+
+
+Received request buffer:
+GET /dynamic/52a8951ee1ae63b0 HTTP/1.1
+Status code: 404
+Response: HTTP/1.1 404 Not Found
+Content-Length: 0
+
+
+
