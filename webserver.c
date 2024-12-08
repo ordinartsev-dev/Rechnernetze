@@ -280,10 +280,11 @@ int main(int argc, char *argv[])
         printf("Accepted connection\n");
         static char request_buffer[8192] = {0}; // Adjusted buffer size to 8192 bytes
         static int buffer_length = 0;          // Current length of data in buffer
-        char buffer[8192];
         while (1)
         {
-            ssize_t received = recv(client_sock, buffer, sizeof(buffer) - 1, 0);
+            char buffer[8192];
+
+            ssize_t received = recv(client_sock, &buffer, sizeof(buffer) - 1, 0);
 
             if (received == -1)
             {
@@ -309,7 +310,7 @@ int main(int argc, char *argv[])
 
             if (received > 0)
             {
-                printf("Received data: %s\n", buffer);
+                printf("Received data: %s\n", request_buffer);
 
                 const char *word = "\r\n\r\n";
                 char *result = strstr(request_buffer, word);
@@ -318,9 +319,9 @@ int main(int argc, char *argv[])
                 int content_length = 0;
                 if(result != NULL){
                     content_length = get_content_length(request_buffer);
-                    payload_len = (result - request_buffer) + strlen(word);
+                    payload_len =  strlen(result) - strlen(word);
                 }
-                
+                // printf("Payload: %d, content_len: %d\n", payload_len, content_length);
 
                 if (payload_len >= content_length)
                 {
@@ -332,6 +333,7 @@ int main(int argc, char *argv[])
                     strncpy(global_body, body, sizeof(global_body) - 1);
                     global_body[sizeof(global_body) - 1] = '\0';
 
+                    printf("Checking request\n");
                     int status_code = check(request_buffer);
 
                     // Creating the response
@@ -393,7 +395,7 @@ int main(int argc, char *argv[])
                     {
                         perror("Send failed");  // Send failed!
                     }
-
+                    printf("Sent response: %s\n", response);
                     // Clear the buffer after it has been processed
                     memset(request_buffer, 0, sizeof(request_buffer));
                     buffer_length = 0;
