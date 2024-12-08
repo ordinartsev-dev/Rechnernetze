@@ -376,6 +376,8 @@ int main(int argc, char *argv[]) {
             if (bytes_sent == -1)
             {
                 perror("Send failed");  // Send failed!
+                close(client_sock);
+                close(sock);
             }
 
             // Remove headers + body
