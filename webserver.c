@@ -282,7 +282,7 @@ int main(int argc, char *argv[])
         static int buffer_length = 0;          // Current length of data in buffer
         while (1)
         {
-            char buffer[8192];
+            char buffer[8192] = {0};
 
             ssize_t received = recv(client_sock, &buffer, sizeof(buffer) - 1, 0);
 
@@ -304,23 +304,19 @@ int main(int argc, char *argv[])
             }
 
             // Copy received data into request_buffer
-            memcpy(request_buffer + buffer_length, buffer, received);
+            // memcpy(request_buffer + buffer_length, buffer, received);
+            strcat(request_buffer, buffer);
             buffer_length += received;
             request_buffer[buffer_length] = '\0';
 
-            if (received > 0)
-            {
-                printf("Received data: %s\n", request_buffer);
+            printf("Received data: %s\n", request_buffer);
 
-                const char *word = "\r\n\r\n";
-                char *result = strstr(request_buffer, word);
+            const char *word = "\r\n\r\n";
+            char *result = strstr(request_buffer, word);
+            while(result != NULL){
+                int payload_len = strlen(result) - strlen(word);
+                int content_length = get_content_length(request_buffer);;
 
-                int payload_len = -1;
-                int content_length = 0;
-                if(result != NULL){
-                    content_length = get_content_length(request_buffer);
-                    payload_len =  strlen(result) - strlen(word);
-                }
                 // printf("Payload: %d, content_len: %d\n", payload_len, content_length);
 
                 if (payload_len >= content_length)
@@ -396,13 +392,23 @@ int main(int argc, char *argv[])
                         perror("Send failed");  // Send failed!
                     }
                     printf("Sent response: %s\n", response);
-                    // Clear the buffer after it has been processed
-                    memset(request_buffer, 0, sizeof(request_buffer));
-                    buffer_length = 0;
-                    memset(global_body, 0, sizeof(global_body));
-                }
 
+                    // Clear the buffer after it has been processed
+                    // memset(request_buffer, 0, sizeof(request_buffer));
+                    // buffer_length = 0;
+                    // memset(global_body, 0, sizeof(global_body));
+
+                    int remaining_length = strlen(result) + strlen(word)+content_length;
+                    memmove(request_buffer, result + strlen(word)+content_length, remaining_length + 1);
+                    buffer_length = remaining_length;
+                    request_buffer[buffer_length] = '\0';
+
+                    result = strstr(request_buffer, word);
+                }else{
+                    break;
+                }
             }
+
         }
 
         // Close the client socket
