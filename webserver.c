@@ -50,6 +50,7 @@ void log_request_and_status_to_file(const char *filename, const char *request_bu
     fclose(file);
 }
 
+// Parses request headers and determines initial status, deferring PUT resource creation/update until body is read.
 int check_request(char *str, int *content_length_out) {
     if (!str) return -1;
 
@@ -80,7 +81,7 @@ int check_request(char *str, int *content_length_out) {
 
         if (strcasecmp(key, "Content-Length") == 0) {
             content_length = atoi(value);
-            if (content_length > 8192) return 413;
+            if (content_length > 8192) return 413; // Payload too large
         }
 
         header = strtok(NULL, "\r\n");
@@ -88,6 +89,7 @@ int check_request(char *str, int *content_length_out) {
 
     *content_length_out = content_length;
 
+    // Support GET, PUT, DELETE, others => 501
     if (strcmp(method, "GET") == 0) {
         if (strncmp(last_uri, "/static/", 8) == 0) {
             char *resource_name = last_uri + 8;
@@ -111,9 +113,9 @@ int check_request(char *str, int *content_length_out) {
         }
 
     } else if (strcmp(method, "PUT") == 0) {
+        // Defer final PUT status until after reading the body
         if (!strncmp(last_uri, "/dynamic/", 9)) {
-            // We'll finalize status after reading body
-            return 0;
+            return 0; // indicates deferred decision
         }
         return 403;
 
@@ -205,7 +207,7 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
-    // Increase timeout
+    // Set a timeout to avoid hanging indefinitely
     struct timeval tv = { .tv_sec = 5, .tv_usec = 0 };
     setsockopt(client_sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
 
@@ -217,7 +219,7 @@ int main(int argc, char *argv[]) {
         ssize_t received = recv(client_sock, buffer, sizeof(buffer), 0);
         if (received == -1) {
             if (errno == EAGAIN || errno == EWOULDBLOCK) {
-                // Timeout
+                // Timeout reached, no more data
                 break;
             } else {
                 perror("Receive failed");
@@ -226,12 +228,12 @@ int main(int argc, char *argv[]) {
         }
 
         if (received == 0) {
-            // Client closed
+            // Client closed connection
             break;
         }
 
         if (buffer_length + (int)received > (int)sizeof(request_buffer)) {
-            // Too large
+            // Request too large
             const char *resp = "HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\n\r\n";
             send(client_sock, resp, strlen(resp), 0);
             break;
@@ -241,33 +243,29 @@ int main(int argc, char *argv[]) {
         buffer_length += (int)received;
         request_buffer[buffer_length] = '\0';
 
+        // Process all complete requests in the buffer
         for (;;) {
             char *end_of_headers = strstr(request_buffer, "\r\n\r\n");
             if (!end_of_headers) {
-                // Need more data for headers
+                // Not enough data for headers
                 break;
             }
 
             int headers_len = (int)((end_of_headers + 4) - request_buffer);
 
             int content_length = 0;
-            // Temporarily separate headers from body for parsing
-            char saved_char = *(end_of_headers);
-            *end_of_headers = '\0';
-
+            char saved_char = *end_of_headers;
+            *end_of_headers = '\0'; // isolate headers
             int status_code = check_request(request_buffer, &content_length);
-
             *end_of_headers = saved_char; // restore
 
-            // Check if we have the full body
             int total_needed = headers_len + content_length;
             if (buffer_length < total_needed) {
-                // Not enough data for body yet, wait for more
-                // Restore end_of_headers char
+                // Not enough data for full body yet
                 break;
             }
 
-            // We have full headers and body now
+            // We have full body now
             char *body = request_buffer + headers_len;
             memset(global_body, 0, sizeof(global_body));
             if (content_length > 0) {
@@ -282,12 +280,12 @@ int main(int argc, char *argv[]) {
                 global_body[0] = '\0';
             }
 
-            // Handle PUT /dynamic/... if status_code was 0
+            // If PUT /dynamic/... initially returned 0, determine final status now
             if (status_code == 0 && strncmp(last_uri, "/dynamic/", 9) == 0) {
                 char *resource_name = last_uri + 9;
                 int found = 0;
                 for (int i = 0; i < resource_count; i++) {
-                    if (strcmp(dynamic_resources[i].path, resource_name) == 0) {
+                    if (!strcmp(dynamic_resources[i].path, resource_name)) {
                         strncpy(dynamic_resources[i].content, global_body, 8191);
                         dynamic_resources[i].content[8191] = '\0';
                         status_code = 204; // updated
@@ -321,11 +319,11 @@ int main(int argc, char *argv[]) {
             } else if (status_code == 200) {
                 if (strncmp(last_uri, "/static/", 8) == 0) {
                     char *resource_name = last_uri + 8;
-                    if (strcmp(resource_name, "foo") == 0) {
+                    if (!strcmp(resource_name, "foo")) {
                         snprintf(response, sizeof(response), "HTTP/1.1 200 OK\r\nContent-Length: 3\r\n\r\nFoo");
-                    } else if (strcmp(resource_name, "bar") == 0) {
+                    } else if (!strcmp(resource_name, "bar")) {
                         snprintf(response, sizeof(response), "HTTP/1.1 200 OK\r\nContent-Length: 3\r\n\r\nBar");
-                    } else if (strcmp(resource_name, "baz") == 0) {
+                    } else if (!strcmp(resource_name, "baz")) {
                         snprintf(response, sizeof(response), "HTTP/1.1 200 OK\r\nContent-Length: 3\r\n\r\nBaz");
                     } else {
                         snprintf(response, sizeof(response), "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n");
@@ -358,7 +356,7 @@ int main(int argc, char *argv[]) {
                 snprintf(response, sizeof(response), "HTTP/1.1 204 No Content\r\nContent-Length: 0\r\n\r\n");
                 log_dynamic_resources_to_file("debug_log.txt");
             } else {
-                // If status_code == 0 (no method?), treat as 500
+                // If status_code == 0 or unknown, treat as 500
                 snprintf(response, sizeof(response), "HTTP/1.1 500 Internal Server Error\r\nContent-Length: 0\r\n\r\n");
             }
 
@@ -366,10 +364,10 @@ int main(int argc, char *argv[]) {
 
             send(client_sock, response, strlen(response), 0);
 
-            // Remove exactly headers + content_length bytes
+            // Remove headers + body
             int remove_len = total_needed;
             if (remove_len > buffer_length) {
-                remove_len = buffer_length; // safety
+                remove_len = buffer_length;
             }
             memmove(request_buffer, request_buffer + remove_len, buffer_length - remove_len);
             buffer_length -= remove_len;
