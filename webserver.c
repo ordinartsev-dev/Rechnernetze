@@ -38,153 +38,143 @@ int get_content_length(const char *request) {
     return 0;
 }
 
-int check(char *str) {
-    if (str == NULL) {
-        fprintf(stderr, "Error: NULL string passed\n");
-        return -1;
+
+int is_valid_header(const char *line) {
+    const char *colon = strchr(line, ':');
+    if (colon == NULL) return 0;
+
+    // Ensure the key has non-whitespace characters
+    for (const char *p = line; p < colon; ++p) {
+        if (!isspace((unsigned char)*p)) {
+            return 1; // Found a valid key before ':'
+        }
     }
 
-    // Variables for the start line
-    char method[16], version[16];
-    int content_length = 0;
+    return 0; // No valid key found
+}
 
-    // Extract the start line
-    char *line = strtok(str, "\r\n");
-    if (line == NULL || sscanf(line, "%15s %255s %15s", method, last_uri, version) != 3) {
-        // Incorrect start line
-        fprintf(stderr, "Error: Invalid request line\n");
+int handle_request(char *request, int content_length) {
+    char *request_copy = strdup(request);
+    char *temp = strdup(request);
+    char *line = strtok(request_copy, "\r\n"); // Split by CRLF
+    if (line == NULL) {
+        printf("No Split by CRLF\n");
         return 400;
     }
 
-    // Check headers
-    int header_count = 0;  // Counter for headers
+    char method[10], version[20];
+    int num_parsed = sscanf(line, "%s %s %s", method, last_uri, version);
+    if (num_parsed != 3){
+        printf("Parsed more or less than 3 (method, uri, version)\n");
+        return 400;
+    }
+
+    // Validate HTTP version
+    if (strncmp(version, "HTTP/", 5) != 0){
+        printf("Invalid HTTP version\n");
+        return 400;
+    }
+
+    // Basic method validation
+    if (strcmp(method, "GET") != 0 && strcmp(method, "POST") != 0 &&
+        strcmp(method, "PUT") != 0 && strcmp(method, "DELETE") != 0 && strcmp(method, "HEAD") != 0) {
+        printf("Invalid method\n");
+        return 400;
+    }
+
+
+    char *end_of_headers = strstr(request_copy, "\r\n\r\n");
     char *header = strtok(NULL, "\r\n");
-    while (header) {
-        if (header_count >= 40) {
-            fprintf(stderr, "Error: Too many headers\n");
-            return 400;
-        }
-        header_count++;
+    while(header){
+        if(header >= end_of_headers) break;
+        char* delimiter = strchr(header, ':');
+        printf("%s\n",header);
+        if(!delimiter){
 
-        // Check the separator ':'
-        char *delimiter = strchr(header, ':');
-        if (!delimiter) {
-            fprintf(stderr, "Error: Invalid header format: %s\n", header);
+            printf("Invalid header format\n");
             return 400;
         }
 
-        // Divide the key's and header's values
-        *delimiter = '\0'; // Replace ':' with '\0'
-        char *key = header;
-        char *value = delimiter + 1;
+        *delimiter = '\0';
+        char* key = header;
+        char* value = delimiter + 1;
+        while(*value == ' ') value++;
 
-        // Remove leading spaces from the value
-        while (*value == ' ') value++;
 
-        // Check length of key and value
-        if (strlen(key) > 256) {
-            fprintf(stderr, "Error: Header name too long: %s\n", key);
-            return 400;
-        }
-
-        if (strlen(value) > 256) {
-            fprintf(stderr, "Error: Header value too long: %s\n", value);
-            return 400;
-        }
-
-        // Process the header
-        if (strcasecmp(key, "Content-Length") == 0) {
-            content_length = atoi(value);
-            if (content_length > 8192) {
-                fprintf(stderr, "Error: Content-Length too large\n");
-                return 413; // Payload Too Large
-            }
-            printf("Parsed Content-Length: %d\n", content_length);
-        }
-
-        // Proceed to the next header
         header = strtok(NULL, "\r\n");
     }
 
-    // Check the methods
-    // Processing method GET
+    char* request_body = malloc(content_length+1);
+    char* body_start = strstr(temp, "\r\n\r\n");
+    body_start += 4;
+
+    if (content_length > 0) {
+
+        memcpy(request_body, body_start, content_length);
+        request_body[content_length] = '\0';
+
+    }
+    // printf("Request body: %s\n", request_body);
+    free(request_copy);
+
     if (strcmp(method, "GET") == 0) {
-        // Check the existence of the file
-        if (strncmp(last_uri, "/static/", 8) == 0) {
-            char *resource_name = last_uri + 8;
-            if (strcmp(resource_name, "foo") == 0) {
-                // "foo" is found
-                return 200;
-            } else if (strcmp(resource_name, "bar") == 0) {
-                // "bar" is found
-                return 200;
-            } else if (strcmp(resource_name, "baz") == 0) {
-                // "baz" is found
-                return 200;
-            } else {
-                return 404;
-            }
-        } else if (strncmp(last_uri, "/dynamic/", 9) == 0) {
-            char *resource_name = last_uri + 9;
+        if(strcmp(last_uri, "/static/bar") == 0) return 200;
+        else if(strcmp(last_uri, "/static/foo") == 0) return 200;
+        else if(strcmp(last_uri, "/static/baz") == 0) return 200;
+        if (strncmp(last_uri, "/dynamic/", 9) == 0){
+            char *resource = last_uri + 9;
             for (int i = 0; i < resource_count; i++) {
-                if (strcmp(dynamic_resources[i].path, resource_name) == 0) {
-                    return 200;
+                if (strcmp(dynamic_resources[i].path, resource) == 0) {
+                    return 200; // Resource found
                 }
             }
-            return 404;
-        } else {
-            return 404;
         }
-
-    } else if (strcmp(method, "PUT") == 0) {
+        return 404;
+    }else if (strcmp(method, "PUT") == 0) {
         if (strncmp(last_uri, "/dynamic/", 9) == 0) {
-            char *resource_name = last_uri + 9;
-            // Check if resource exists
+            char *resource = last_uri + 9;
             for (int i = 0; i < resource_count; i++) {
-                if (strcmp(dynamic_resources[i].path, resource_name) == 0) {
-                    // Update existing resource
-                    strncpy(dynamic_resources[i].content, global_body, 8191);
-                    dynamic_resources[i].content[8191] = '\0';
-                    return 204; // No Content
+                if (strcmp(dynamic_resources[i].path, resource) == 0) {
+                    return 204; // Resource already exists
                 }
             }
 
-            // Create new resource if not found
-            if (resource_count < 100) {
-                strncpy(dynamic_resources[resource_count].path, resource_name, 255);
+
+            if (resource_count < 50) {
+                strncpy(dynamic_resources[resource_count].path, resource, 255);
                 dynamic_resources[resource_count].path[255] = '\0';
-                strncpy(dynamic_resources[resource_count].content, global_body, 8191);
-                dynamic_resources[resource_count].content[8191] = '\0';
+                strncpy(dynamic_resources[resource_count].content, request_body, 255);
+                dynamic_resources[resource_count].content[255] = '\0';
                 resource_count++;
-                return 201; // Created
+                return 201; // Resource created
             }
-            return 403; // Forbidden
+            return 403; // Maximum resource limit reached
         }
-        return 403; // Forbidden
+        return 403; // Invalid path
     }
-    // Process DELETE
     else if (strcmp(method, "DELETE") == 0) {
-        if (strncmp(last_uri, "/dynamic/", 9) == 0) {
-            char *resource_name = last_uri + 9;
-            for (int i = 0; i < resource_count; i++) {
-                if (strcmp(dynamic_resources[i].path, resource_name) == 0) {
-                    for (int j = i; j < resource_count - 1; j++) {
-                        dynamic_resources[j] = dynamic_resources[j + 1];
-                    }
-                    resource_count--;
-                    return 204; // Resource deleted successfully
+    if (strncmp(last_uri, "/dynamic/", 9) == 0) {
+        char *resource = last_uri + 9;
+
+        for (int i = 0; i < resource_count; i++) {
+            if (strcmp(dynamic_resources[i].path, resource) == 0) {
+                // Remove resource by shifting the array
+                for (int j = i; j < resource_count - 1; j++) {
+                    dynamic_resources[j] = dynamic_resources[j + 1];
                 }
+                resource_count--;
+                return 204; // Resource deleted
             }
-            return 404; // Resource not found
-        } else {
-            return 403;
         }
-    } else {
-        fprintf(stderr, "Error: Method not implemented: %s\n", method);
-        return 501; // This method is not implemented
+        return 404; // Resource not found
+    }
+    return 403; // Invalid path
+}
+
+    else{
+        return 501;
     }
 
-    return 0; // Success
 }
 
 static struct sockaddr_in derive_sockaddr(const char* host, const char* port) {
@@ -304,8 +294,8 @@ int main(int argc, char *argv[])
             }
 
             // Copy received data into request_buffer
-            // memcpy(request_buffer + buffer_length, buffer, received);
-            strcat(request_buffer, buffer);
+            memcpy(request_buffer + buffer_length, buffer, received);
+            // strcat(request_buffer, buffer);
             buffer_length += received;
             request_buffer[buffer_length] = '\0';
 
@@ -321,7 +311,9 @@ int main(int argc, char *argv[])
 
                 if (payload_len >= content_length)
                 {
-                    *result = '\0';
+                    char *request = malloc(8192);
+                    memcpy(request, request_buffer, result-request_buffer+strlen(word) + content_length);
+
 
                     char *body = result + 4; // Pointer at the request-body (if it exists)
 
@@ -330,7 +322,7 @@ int main(int argc, char *argv[])
                     global_body[sizeof(global_body) - 1] = '\0';
 
                     printf("Checking request\n");
-                    int status_code = check(request_buffer);
+                    int status_code = handle_request(request, content_length);
 
                     // Creating the response
                     char response[16384]; // Adjusted response buffer size
@@ -396,12 +388,22 @@ int main(int argc, char *argv[])
                     // Clear the buffer after it has been processed
                     // memset(request_buffer, 0, sizeof(request_buffer));
                     // buffer_length = 0;
-                    // memset(global_body, 0, sizeof(global_body));
 
-                    int remaining_length = strlen(result) + strlen(word)+content_length;
-                    memmove(request_buffer, result + strlen(word)+content_length, remaining_length + 1);
+
+
+                    //int remaining_length = strlen(result) + strlen(word)+content_length;
+                    printf("request_buffer initial state: %s\n", request_buffer);
+                    int remaining_length = strlen(body) - content_length;
+                    memmove(request_buffer, body + content_length, remaining_length + 1);
                     buffer_length = remaining_length;
                     request_buffer[buffer_length] = '\0';
+
+
+
+                    memset(global_body, 0, sizeof(global_body));
+
+
+                    printf("Remaining data: %s\n", request_buffer);
 
                     result = strstr(request_buffer, word);
                 }else{
