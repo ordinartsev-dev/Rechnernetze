@@ -207,9 +207,10 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
-    // Set a timeout to avoid hanging indefinitely
-    struct timeval tv = { .tv_sec = 5, .tv_usec = 0 };
-    setsockopt(client_sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+    // Increase timeout or remove it to ensure the server stays open long enough
+    // Let's just remove the timeout for stability
+    // struct timeval tv = { .tv_sec = 0, .tv_usec = 0 };
+    // setsockopt(client_sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
 
     char request_buffer[8192] = {0};
     int buffer_length = 0;
@@ -218,12 +219,13 @@ int main(int argc, char *argv[]) {
         char buffer[8192];
         ssize_t received = recv(client_sock, buffer, sizeof(buffer), 0);
         if (received == -1) {
+            // If a timeout or EAGAIN occurs, just continue waiting
             if (errno == EAGAIN || errno == EWOULDBLOCK) {
-                // Timeout reached, no more data
-                break;
+                // Continue waiting for next request
+                continue;
             } else {
                 perror("Receive failed");
-                break;
+                break; // close connection on fatal error
             }
         }
 
@@ -233,10 +235,13 @@ int main(int argc, char *argv[]) {
         }
 
         if (buffer_length + (int)received > (int)sizeof(request_buffer)) {
-            // Request too large
+            // Request too large, respond and continue
             const char *resp = "HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\n\r\n";
             send(client_sock, resp, strlen(resp), 0);
-            break;
+            // Clear buffer and continue to next request
+            buffer_length = 0;
+            request_buffer[0] = '\0';
+            continue;
         }
 
         memcpy(request_buffer + buffer_length, buffer, received);
@@ -254,7 +259,6 @@ int main(int argc, char *argv[]) {
             int headers_len = (int)((end_of_headers + 4) - request_buffer);
 
             int content_length = 0;
-            // Temporarily null-terminate headers
             char saved_char = *end_of_headers;
             *end_of_headers = '\0';
             int status_code = check_request(request_buffer, &content_length);
@@ -266,7 +270,6 @@ int main(int argc, char *argv[]) {
                 break;
             }
 
-            // Now we have full request (headers+body)
             char *body = request_buffer + headers_len;
             memset(global_body, 0, sizeof(global_body));
             if (content_length > 0) {
